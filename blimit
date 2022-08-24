@@ -1,0 +1,135 @@
+#/bin/zsh
+set -e
+
+# smc可执行文件路径，自行修改，建议存放到opt目录下
+smc="/opt/tools/bin/smc"
+
+# 记录电池电量
+# 存储电池电量的文件位置，因设置限制充电必须root权限，故直接写到root目录下了
+oldCountPath="/var/root/.battery.raw"
+
+# 为配合开机自启设置，如果能获取到家目录就存放在家目录下
+if [ "$HOME" != "" ];then
+	oldCountPath="$HOME/.battery.raw"
+fi
+
+if [ ! -f $oldCountPath ]; then
+	touch $oldCountPath
+fi
+
+# 历史电量
+oldCount=0
+# 读取历史电量
+value="$(cat $oldCountPath)"
+if [ "$value" = "" ]; then
+	oldCount=0
+else
+	oldCount=`expr "$value"`
+fi
+
+# 记录充电状态
+# 存储充电状态的文件位置，因设置限制充电必须root权限，故直接写到root目录下了
+oldStatusPath="/var/root/.battery.status"
+
+# 为配合开机自启设置，如果能获取到家目录就存放在家目录下
+if [ "$HOME" != "" ];then
+	oldStatusPath="$HOME/.battery.status"
+fi
+
+if [ ! -f $oldStatusPath ]; then
+	touch $oldStatusPath
+fi
+
+# 历史状态
+oldStatus=""
+# 读取历史状态
+value="$(cat $oldStatusPath)"
+if [ "$value" != "" ]; then
+	oldStatus=$value
+fi
+
+# 读取当前电池电量百分比，如果想确保显示的和限制的一致就用B0UC
+# BRSC B0UC
+h="$($smc -k B0UC -r)"
+# 从输出信息里读取到电池电量百分比的值
+r="${h##*\[ui16\]  }"
+count=`expr ${r%%\ \(b*} / 16 / 16`
+
+# 读取电池容量
+value="$($smc -k B0RM -r)"
+value="${value##*\[ui16\]  }"
+passed=${value%%\ \(b*}
+
+# 输出日志
+function loger {
+	# 将当前电量写入到文件
+	echo $count > $oldCountPath
+	# 将当前电池状态写入到文件
+	echo $1 > $oldStatusPath
+	if [ $count != $oldCount -o "$oldStatus" != "$1" ]; then
+		echo "[$(date "+%Y-%m-%d %H:%M:%S")] 当前电量: $count%	容量：$passed mA/h	$1"
+	fi
+	exit 0
+}
+
+# 读取电源连接情况
+# 电源是否连接
+value="$($smc -k AC-W -r)"
+if [[ $value =~ "ff)" ]]; then
+	loger "直流供电"
+	exit 0
+fi
+
+isJoin=true
+value="$($smc -k CH0B -r)"
+if [[ "$value" =~ "02)" ]]; then
+	isJoin=false
+fi
+
+# 如果历史状态是"直流供电"
+if [ "$oldStatus" = "直流供电" ]; then
+	isJoin=true
+fi
+
+# 读取参数，第一个参数表示是否限制充电，第二个参数是最低电量百分比，第三个是最高电量百分比
+if [ "$1" = "true" ]; then
+	if [ "$2" = "" ]; then
+		min=50
+	else
+		min=`expr $2`
+	fi
+
+	if [ "$3" = "" ]; then
+		max=80
+	else
+		max=`expr $3`
+	fi
+
+	if [ $count -gt $max ]; then
+		# 当前电池电量大于等于设置的就限制充电，如果当前已经限制了就不再设置了
+		if [ $isJoin = true ]; then
+			result=$($smc -k CH0B -w 02)
+			if [ "$result" = "" ]; then
+	   			loger "限制充电"
+	   		else
+	   			loger "$result"
+	   		fi
+		fi
+	elif [ $count -le $min ]; then
+		# 当前电池电量小于等于设置的就允许充电，如果当前已经允许了就不再设置了
+		if [ $isJoin = false ]; then
+			result=$($smc -k CH0B -w 00)
+			if [ "$result" = "" ]; then
+	   			loger "允许充电"
+	   		else
+	   			loger "$result"
+	   		fi
+	   	fi
+	fi
+fi
+
+if [ $isJoin = true ]; then
+	loger "交流充电"
+fi
+
+loger "交流供电"

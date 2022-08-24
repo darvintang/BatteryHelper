@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>cn.tcoding.battery.helper</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/tools/bin/blimit</string>
+		<string>true</string>
+		<string>60</string>
+		<string>80</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>30</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/username/.battery/error.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/username/.battery/out.log</string>
+</dict>
+</plist>
