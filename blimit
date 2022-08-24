@@ -1,0 +1,111 @@
+#/bin/zsh
+set -e
+
+# 记录电池电量
+# 存储电池电量的文件位置，因设置限制充电必须root权限，故直接写到root目录下了
+oldcountPath="/var/root/.battery.raw"
+
+# 为配合开机自启设置，如果能获取到家目录就存放在家目录下
+if [ "$HOME" != "" ];then
+	oldcountPath="$HOME/.battery.raw"
+fi
+
+if [ ! -f $oldcountPath ]; then
+	touch $oldcountPath
+fi
+# 历史电量
+oldcount=0
+# 读取历史电量
+value="$(cat $oldcountPath)"
+if [ "$value" = "" ]; then
+	oldcount=0
+else
+	oldcount=`expr "$value"`
+fi
+
+# smc可执行文件路径，自行修改，建议存放到opt目录下
+smc="/opt/tools/bin/smc"
+
+# 读取当前电池电量百分比，如果想确保显示的和限制的一致就用B0UC
+# BRSC B0UC
+h="$($smc -k BRSC -r)"
+# 从输出信息里读取到电池电量百分比的值
+r="${h##*\[ui16\]  }"
+count=`expr ${r%%\ \(b*} / 16 / 16`
+
+# 如果历史电量和当前的电了一致那就不往下执行了，没必要
+if [ "$oldcount" = "$count" ]; then
+	exit 0
+fi
+
+# 将当前电量写入到文件
+echo $count > $oldcountPath
+
+# 读取电池容量
+value="$($smc -k B0RM -r)"
+value="${value##*\[ui16\]  }"
+passed=${value%%\ \(b*}
+
+# 输出日志
+function loger {
+	echo "[$(date "+%Y-%m-%d %H:%M:%S")] 当前电量: $count%	容量：$passed mA/h	$1"
+	exit 0
+}
+
+# 电源是否连接
+value="$($smc -k AC-W -r)"
+if [[ $value =~ "ff)" ]]; then
+	loger "直流供电"
+	exit 0
+fi
+
+# 充电状态
+cstatus=true
+value="$($smc -k CH0B -r)"
+if [[ "$value" =~ "02)" ]]; then
+	cstatus=false
+fi
+
+# 读取参数，第一个参数表示是否限制充电，第二个参数是最低电量百分比，第三个是最高电量百分比
+if [ "$1" = "true" ]; then
+
+	if [ "$2" = "" ]; then
+		min=50
+	else
+		min=`expr $2`
+	fi
+
+	if [ "$3" = "" ]; then
+		max=90
+	else
+		max=`expr $3`
+	fi
+
+	if [ $count -gt $max ]; then
+		# 当前电池电量大于等于设置的就限制充电，如果当前已经限制了就不再设置了
+		if [ $cstatus = true ]; then
+			result=$($smc -k CH0B -w 02)
+			if [ "$result" = "" ]; then
+	   			loger "限制充电"
+	   		else
+	   			loger "$result"
+	   		fi
+		fi
+	elif [ $count -le $min ]; then
+		# 当前电池电量小于等于设置的就允许充电，如果当前已经允许了就不再设置了
+		if [ $cstatus = false ]; then
+			result=$($smc -k CH0B -w 00)
+			if [ "$result" = "" ]; then
+	   			loger "允许充电"
+	   		else
+	   			loger "$result"
+	   		fi
+	   	fi
+	fi
+fi
+
+if [ $cstatus = true ]; then
+	loger "交流充电"
+fi
+
+loger "交流供电"
